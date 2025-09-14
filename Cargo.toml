@@ -13,6 +13,10 @@ serde = { version = "1.0.210", features = ["derive"] }
 toml = "0.8.19"
 semver = "1.0.23"
 tokio = { version = "1.39.2", features = ["macros", "rt-multi-thread", "fs"] }
+toml_edit = "0.22.22"
+chrono = { version = "0.4.38", default-features = false, features = ["clock"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt", "ansi"] }
 
 [dev-dependencies]
 insta = { version = "1.39.0", features = ["glob"] }

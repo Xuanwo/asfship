@@ -10,11 +10,15 @@ use crate::config::load_minimal_config;
 #[derive(Debug, Clone)]
 pub struct CrateInfo {
     pub name: String,
+    pub version: semver::Version,
+    pub manifest_path: PathBuf,
+    pub package_root: PathBuf,
     pub internal_dep_count: usize,
 }
 
 #[derive(Debug, Clone)]
 pub struct InferredContext {
+    pub repo_root: PathBuf,
     pub repo_owner: String,
     pub repo_name: String,
     pub crates: Vec<CrateInfo>,
@@ -23,6 +27,7 @@ pub struct InferredContext {
 }
 
 pub async fn repo_root() -> Result<PathBuf> {
+    tracing::trace!("infer: discovering repo root");
     tokio::task::spawn_blocking(|| {
         let repo = Repository::discover(".")?;
         Ok::<_, anyhow::Error>(repo.workdir().unwrap_or(repo.path()).to_path_buf())
@@ -134,8 +139,17 @@ pub fn collect_crates(meta: &Metadata) -> Result<Vec<CrateInfo>> {
             continue;
         }
         let count = internal_counts.get(&pkg.id).copied().unwrap_or(0);
+        let manifest_path = PathBuf::from(&pkg.manifest_path);
+        let package_root = manifest_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
         result.push(CrateInfo {
             name: pkg.name.clone(),
+            version: semver::Version::parse(&pkg.version.to_string())
+                .unwrap_or_else(|_| semver::Version::new(0, 1, 0)),
+            manifest_path,
+            package_root,
             internal_dep_count: count,
         });
     }
@@ -192,7 +206,16 @@ pub async fn build_context() -> Result<InferredContext> {
     let crates = collect_crates(&meta)?;
     let main_crate = infer_main_crate(&crates, &meta, &name, &root).await?;
     let last = find_last_stable_tag(&root).await?;
+    tracing::info!(
+        "infer: ok owner={} repo={} crates={} main={} base_tag={:?}",
+        owner,
+        name,
+        crates.len(),
+        main_crate,
+        last
+    );
     Ok(InferredContext {
+        repo_root: root,
         repo_owner: owner,
         repo_name: name,
         crates,
