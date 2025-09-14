@@ -1,0 +1,20 @@
+[package]
+name = "asfship"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.86"
+cargo_metadata = "0.18.1"
+clap = { version = "4.5.16", features = ["derive"] }
+git2 = "0.19.0"
+regex = "1.10.6"
+serde = { version = "1.0.210", features = ["derive"] }
+toml = "0.8.19"
+semver = "1.0.23"
+tokio = { version = "1.39.2", features = ["macros", "rt-multi-thread", "fs"] }
+
+[dev-dependencies]
+insta = { version = "1.39.0", features = ["glob"] }
+assert_cmd = "2.0.16"
+tempfile = "3.12.0"
