@@ -234,7 +234,7 @@ Idempotency: If the exact rc tag already exists, abort with instructions and do 
 Phase 1 — CLI & Inference (MVP) — Status: wait on review
 - Skeleton CLI with subcommands and minimal config (optional).
 
-Phase 2 — Versioning & Changelog
+Phase 2 — Versioning & Changelog — Status: wait on review
 - Implement per-crate change detection, SemVer bump, and `Cargo.toml` updates (`toml_edit`).
 - Update dependent versions for intra-workspace crates.
 - Generate per-crate `CHANGELOG.md` sections.
@@ -345,4 +345,3 @@ Changed crates:
 - {{ c.name }}: {{ c.old_version }} → {{ c.new_version }}
 {% endfor %}
 ```
-
