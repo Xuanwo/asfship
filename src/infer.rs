@@ -171,10 +171,9 @@ pub async fn find_last_stable_tag(root: &Path) -> Result<Option<String>> {
         let repo = Repository::discover(root)?;
         let tag_re = Regex::new(r"^v\d+\.\d+\.\d+$").unwrap();
         let mut tags = Vec::new();
-        for r in repo.references()?.flatten() {
-            if let Some(name) = r
-                .shorthand()
-                .filter(|name| r.is_tag() && tag_re.is_match(name))
+        for r in repo.references_glob("refs/tags/*")?.flatten() {
+            if let Some(name) = r.shorthand()
+                && tag_re.is_match(name)
             {
                 tags.push(name.to_string());
             }
