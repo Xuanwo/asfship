@@ -1,10 +1,6 @@
-# asfship — Project Agent Guide (Spec Mirrored)
-
-This AGENTS.md mirrors the canonical specification at `docs/spec/asfship-spec.md` so that agents have the spec in-scope during all edits. Keep code and comments in English. CLI output and discussions with maintainers may be in Simplified Chinese; repository documentation remains English.
+Keep code and comments in English. CLI output and discussions with maintainers may be in Simplified Chinese; repository documentation remains English.
 
 ---
-
-# asfship: Release Orchestration for ASF Projects — Specification
 
 ## 1. Purpose and Scope
 
