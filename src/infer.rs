@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
@@ -30,7 +31,8 @@ pub async fn repo_root() -> Result<PathBuf> {
     tracing::trace!("infer: discovering repo root");
     tokio::task::spawn_blocking(|| {
         let repo = Repository::discover(".")?;
-        Ok::<_, anyhow::Error>(repo.workdir().unwrap_or(repo.path()).to_path_buf())
+        let raw = repo.workdir().unwrap_or(repo.path()).to_path_buf();
+        Ok::<_, anyhow::Error>(normalize_path(&raw))
     })
     .await
     .map_err(|e| anyhow::anyhow!("repo_root task join error: {}", e))?
@@ -139,7 +141,7 @@ pub fn collect_crates(meta: &Metadata) -> Result<Vec<CrateInfo>> {
             continue;
         }
         let count = internal_counts.get(&pkg.id).copied().unwrap_or(0);
-        let manifest_path = PathBuf::from(&pkg.manifest_path);
+        let manifest_path = normalize_path(Path::new(&pkg.manifest_path));
         let package_root = manifest_path
             .parent()
             .map(|p| p.to_path_buf())
@@ -155,6 +157,30 @@ pub fn collect_crates(meta: &Metadata) -> Result<Vec<CrateInfo>> {
     }
 
     Ok(result)
+}
+
+fn normalize_path<P: AsRef<Path>>(path: P) -> PathBuf {
+    let path = path.as_ref();
+    match fs::canonicalize(path) {
+        Ok(p) => strip_verbatim_prefix(p),
+        Err(_) => strip_verbatim_prefix(path.to_path_buf()),
+    }
+}
+
+#[cfg(windows)]
+fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    const VERBATIM_PREFIX: &str = r"\\?\";
+    if let Some(s) = path.to_str() {
+        if let Some(rest) = s.strip_prefix(VERBATIM_PREFIX) {
+            return PathBuf::from(rest);
+        }
+    }
+    path
+}
+
+#[cfg(not(windows))]
+fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    path
 }
 
 fn root_package(meta: &Metadata) -> Option<&Package> {
