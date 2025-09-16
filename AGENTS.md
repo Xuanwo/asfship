@@ -109,7 +109,7 @@ Optional root-level release summary can be generated for Discussions using templ
 
 - Read tags and commits via libgit2 (`git2`) wrapped in async helpers.
 - Create tags (annotated), commits, and pushes via `git2` or `tokio::process::Command` for `git` when needed.
-- GitHub API via `octocrab` using `GITHUB_TOKEN` or `GH_TOKEN`. If missing, fallback to `gh` CLI when available.
+- GitHub API via `octocrab` using `ASFSHIP_GITHUB_TOKEN`. If missing, fallback to `gh` CLI when available.
 - Discussions: created in a category named "Releases" (or the first available category if not present) with titles and bodies rendered from built-in templates.
 - Releases: created for both rc and stable tags; rc releases marked `prerelease=true`.
 - Rate limits and retries handled by `octocrab` with exponential backoff.
