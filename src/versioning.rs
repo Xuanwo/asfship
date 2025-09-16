@@ -102,7 +102,9 @@ pub async fn run_prerelease(ctx: &InferredContext, dry_run: bool) -> Result<()> 
         let artifacts = package_changed_crates(ctx, &plan, &rc_tag, rc_n).await?;
         upload_assets(&ctx.repo_owner, &ctx.repo_name, &rc_tag, &artifacts).await?;
     } else {
-        tracing::info!("rc: skip tagging and packaging (no GitHub auth detected)");
+        tracing::warn!(
+            "rc: skip tagging and packaging (set ASFSHIP_GITHUB_TOKEN to enable GitHub integration)"
+        );
     }
     Ok(())
 }
