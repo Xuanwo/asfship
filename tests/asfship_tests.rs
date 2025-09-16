@@ -3,7 +3,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use assert_cmd::prelude::*;
-use git2::{IndexAddOption, Repository, Signature};
+use git2::{IndexAddOption, Repository, Signature, build::CheckoutBuilder};
 use tempfile::TempDir;
 
 fn write_file(path: &Path, content: &str) -> Result<()> {
@@ -22,8 +22,9 @@ fn init_repo(root: &Path, origin: &str) -> Result<Repository> {
     let oid = idx.write_tree()?;
     let sig = Signature::now("asfship", "asfship@example.com")?;
     let tree = repo.find_tree(oid)?;
-    // Create initial commit on main
-    let _commit_oid = repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])?;
+    // Create initial commit on the repository's default HEAD
+    let _commit_oid = repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])?;
+    repo.checkout_head(Some(CheckoutBuilder::new().force()))?;
     drop(tree);
     repo.remote("origin", origin)?;
     Ok(repo)

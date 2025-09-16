@@ -102,7 +102,9 @@ pub async fn run_prerelease(ctx: &InferredContext, dry_run: bool) -> Result<()> 
         let artifacts = package_changed_crates(ctx, &plan, &rc_tag, rc_n).await?;
         upload_assets(&ctx.repo_owner, &ctx.repo_name, &rc_tag, &artifacts).await?;
     } else {
-        tracing::info!("rc: skip tagging and packaging (no GitHub auth detected)");
+        tracing::warn!(
+            "rc: skip tagging and packaging (set ASFSHIP_GITHUB_TOKEN to enable GitHub integration)"
+        );
     }
     Ok(())
 }
@@ -744,13 +746,18 @@ fn is_not_found(err: &octocrab::Error) -> bool {
 }
 
 fn github_token() -> Result<String> {
-    std::env::var("GITHUB_TOKEN")
-        .or_else(|_| std::env::var("GH_TOKEN"))
-        .map_err(|_| anyhow::anyhow!("missing GITHUB_TOKEN or GH_TOKEN for GitHub API"))
+    match std::env::var("ASFSHIP_GITHUB_TOKEN") {
+        Ok(val) if !val.is_empty() => Ok(val),
+        _ => Err(anyhow::anyhow!(
+            "missing ASFSHIP_GITHUB_TOKEN for GitHub API"
+        )),
+    }
 }
 
 fn has_github_auth() -> bool {
-    std::env::var("GITHUB_TOKEN").is_ok() || std::env::var("GH_TOKEN").is_ok()
+    std::env::var("ASFSHIP_GITHUB_TOKEN")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
 }
 
 fn package_from_tree(
