@@ -7,7 +7,6 @@ use chrono::Utc;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use git2::{Repository, Sort};
-use octocrab::Octocrab;
 use regex::Regex;
 use sha2::{Digest, Sha512};
 use std::io::Cursor;
@@ -23,6 +22,7 @@ use reqwest::StatusCode;
 use reqwest::header;
 use urlencoding::encode as url_encode;
 
+use crate::github;
 use crate::infer::{CrateInfo, InferredContext};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -88,7 +88,7 @@ pub async fn run_prerelease(ctx: &InferredContext, dry_run: bool) -> Result<()> 
     apply_changes(ctx, &plan)?;
 
     // Phase 3 — RC Tagging & Packaging (skip if no GitHub auth found)
-    if has_github_auth() {
+    if github::has_token() {
         let base_version = &plan.per_crate[&ctx.main_crate].new_version;
         let (rc_tag, rc_n) = next_rc_tag(&repo, base_version)?;
         tracing::info!("rc: choosing tag={} (rc={})", rc_tag, rc_n);
@@ -582,7 +582,7 @@ async fn push_head_and_tag(repo_root: &Path, tag: &str) -> Result<()> {
 
 async fn create_github_prerelease(owner: &str, repo: &str, tag: &str) -> Result<()> {
     tracing::info!("github: creating prerelease for tag={}", tag);
-    let gh = github_client()?;
+    let gh = github::client()?;
     let repos = gh.repos(owner.to_string(), repo.to_string());
     let rh = repos.releases();
     match rh.get_by_tag(tag).await {
@@ -691,11 +691,11 @@ async fn upload_assets(owner: &str, repo: &str, tag: &str, files: &[PathBuf]) ->
         return Ok(());
     }
     tracing::info!("github: uploading {} assets", files.len());
-    let gh = github_client()?;
+    let gh = github::client()?;
     let repos = gh.repos(owner.to_string(), repo.to_string());
     let rh = repos.releases();
     let release = rh.get_by_tag(tag).await?;
-    let token = github_token()?;
+    let token = github::token()?;
     let client = reqwest::Client::new();
     let base_upload_url = release
         .upload_url
@@ -732,32 +732,11 @@ async fn upload_assets(owner: &str, repo: &str, tag: &str, files: &[PathBuf]) ->
     Ok(())
 }
 
-fn github_client() -> Result<Octocrab> {
-    let token = github_token()?;
-    let gh = Octocrab::builder().personal_token(token).build()?;
-    Ok(gh)
-}
-
 fn is_not_found(err: &octocrab::Error) -> bool {
     if let octocrab::Error::GitHub { source, .. } = err {
         return source.status_code == StatusCode::NOT_FOUND;
     }
     false
-}
-
-fn github_token() -> Result<String> {
-    match std::env::var("ASFSHIP_GITHUB_TOKEN") {
-        Ok(val) if !val.is_empty() => Ok(val),
-        _ => Err(anyhow::anyhow!(
-            "missing ASFSHIP_GITHUB_TOKEN for GitHub API"
-        )),
-    }
-}
-
-fn has_github_auth() -> bool {
-    std::env::var("ASFSHIP_GITHUB_TOKEN")
-        .map(|v| !v.is_empty())
-        .unwrap_or(false)
 }
 
 fn package_from_tree(

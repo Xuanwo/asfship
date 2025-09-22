@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::Result;
-use assert_cmd::prelude::*;
+use assert_cmd::Command;
 use git2::{IndexAddOption, Repository, Signature, build::CheckoutBuilder};
 use tempfile::TempDir;
 
@@ -53,6 +53,13 @@ fn read_version(manifest: &Path) -> String {
         .to_string()
 }
 
+fn asfship_cmd(root: &Path) -> Result<Command> {
+    let mut cmd = Command::cargo_bin("asfship")?;
+    cmd.current_dir(root);
+    cmd.env_remove("ASFSHIP_GITHUB_TOKEN");
+    Ok(cmd)
+}
+
 // Snapshot-like smoke tests
 
 #[test]
@@ -70,10 +77,9 @@ edition = "2021"
     write_file(&root.join("src/lib.rs"), "pub fn _noop() {}\n")?;
     let _repo = init_repo(root, "https://github.com/apache/foo.git")?;
 
-    let output = std::process::Command::cargo_bin("asfship")?
-        .current_dir(root)
-        .args(["start", "--dry-run"])
-        .output()?;
+    let mut cmd = asfship_cmd(root)?;
+    cmd.args(["start", "--dry-run"]);
+    let output = cmd.output()?;
     assert!(
         output.status.success(),
         "status: {:?}\nstderr: {}",
@@ -81,7 +87,19 @@ edition = "2021"
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout)?;
-    insta::assert_snapshot!(stdout, @r###"start: ready (repo=apache/foo main_crate=foo)
+    insta::assert_snapshot!(stdout, @r###"start: dry-run (category=Releases title=foo Release Kickoff)
+---
+# foo Release Kickoff
+
+- Base tag: <none>
+- Main crate: foo
+- Proposed release date: TBD
+
+Workspace crates:
+- foo 0.1.0
+
+
+Please add agenda items, blockers, and verification tasks below. Once scope is agreed, run `asfship prerelease` to prepare the first release candidate.
 "###);
     Ok(())
 }
@@ -101,10 +119,9 @@ edition = "2021"
     write_file(&root.join("src/lib.rs"), "pub fn _noop() {}\n")?;
     let _repo = init_repo(root, "https://github.com/apache/foo.git")?;
 
-    let output = std::process::Command::cargo_bin("asfship")?
-        .current_dir(root)
-        .args(["prerelease", "--dry-run"])
-        .output()?;
+    let mut cmd = asfship_cmd(root)?;
+    cmd.args(["prerelease", "--dry-run"]);
+    let output = cmd.output()?;
     assert!(
         output.status.success(),
         "status: {:?}\nstderr: {}",
@@ -139,11 +156,9 @@ edition = "2021"
     write_file(&root.join("src/new.rs"), "pub fn g() {}\n")?;
     commit_all(&repo, "feat: add new module")?;
 
-    let status = std::process::Command::cargo_bin("asfship")?
-        .current_dir(root)
-        .args(["prerelease"])
-        .status()?;
-    assert!(status.success());
+    let mut cmd = asfship_cmd(root)?;
+    cmd.args(["prerelease"]);
+    cmd.assert().success();
     let v = read_version(&root.join("Cargo.toml"));
     assert_eq!(v, "0.1.1");
     let changelog = fs::read_to_string(root.join("CHANGELOG.md")).unwrap();
@@ -170,11 +185,9 @@ edition = "2021"
     write_file(&root.join("src/lib.rs"), "pub fn f() {} pub fn h() {}\n")?;
     commit_all(&repo, "refactor!: breaking change")?;
 
-    let status = std::process::Command::cargo_bin("asfship")?
-        .current_dir(root)
-        .args(["prerelease"])
-        .status()?;
-    assert!(status.success());
+    let mut cmd = asfship_cmd(root)?;
+    cmd.args(["prerelease"]);
+    cmd.assert().success();
     let v = read_version(&root.join("Cargo.toml"));
     assert_eq!(v, "0.2.0");
     Ok(())
@@ -199,11 +212,9 @@ edition = "2021"
     write_file(&root.join("src/new.rs"), "pub fn g() {}\n")?;
     commit_all(&repo, "feat: exciting feature")?;
 
-    let status = std::process::Command::cargo_bin("asfship")?
-        .current_dir(root)
-        .args(["prerelease"])
-        .status()?;
-    assert!(status.success());
+    let mut cmd = asfship_cmd(root)?;
+    cmd.args(["prerelease"]);
+    cmd.assert().success();
     let v = read_version(&root.join("Cargo.toml"));
     assert_eq!(v, "1.3.0");
     Ok(())
