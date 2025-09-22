@@ -778,52 +778,111 @@ fn package_from_tree(
         .compression_method(ZipCompression::Deflated)
         .unix_permissions(0o644);
 
-    let crate_prefix = crate_rel.to_string_lossy().replace('\\', "/");
-    let norm_prefix = if crate_prefix.ends_with('/') {
-        crate_prefix
-    } else {
-        format!("{}/", crate_prefix)
-    };
+    let crate_rel = normalize_relative(crate_rel);
+    let mut error: Option<anyhow::Error> = None;
 
     tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
         let name = match entry.name() {
             Some(n) => n,
             None => return 0,
         };
-        let full = format!("{}{}", root, name);
-        if !full.starts_with(&norm_prefix) {
+
+        let mut full_path = PathBuf::from(root);
+        full_path.push(name);
+
+        // Skip anything outside of the crate subtree when the crate lives under a subdir.
+        if !crate_rel.as_os_str().is_empty() && !full_path.starts_with(&crate_rel) {
             return 0;
         }
+
+        if should_skip_artifact_path(&full_path) {
+            return 0;
+        }
+
         if let Some(git2::ObjectType::Blob) = entry.kind()
             && let Ok(obj) = entry.to_object(repo)
             && let Ok(blob) = obj.into_blob()
         {
-            // Paths use the repository-relative path
-            let path_in = Path::new(&full);
-            // tar
-            let mut header = tar::Header::new_gnu();
-            if header.set_path(path_in).is_err() {
-                return 0;
+            let archive_path = full_path.as_path();
+
+            if let Err(err) = append_tar_entry(&mut tar, archive_path, blob.content()) {
+                let msg = err.to_string();
+                tracing::warn!(path=%display_path(archive_path), error=%msg, "tar append failed");
+                if error.is_none() {
+                    error = Some(err);
+                }
+                return 1;
             }
-            header.set_size(blob.content().len() as u64);
-            header.set_mode(0o644);
-            header.set_cksum();
-            let mut cursor = Cursor::new(blob.content());
-            if tar.append(&header, &mut cursor).is_err() {
-                return 0;
+
+            let path_str = to_unix_path(archive_path);
+            if let Err(err) = zip.start_file(&path_str, zopt) {
+                let msg = err.to_string();
+                tracing::warn!(path=%path_str, error=%msg, "zip start_file failed");
+                if error.is_none() {
+                    error = Some(err.into());
+                }
+                return 1;
             }
-            // zip
-            if zip.start_file(full.clone(), zopt).is_err() {
-                return 0;
-            }
-            if zip.write_all(blob.content()).is_err() {
-                return 0;
+            if let Err(err) = zip.write_all(blob.content()) {
+                let msg = err.to_string();
+                tracing::warn!(path=%path_str, error=%msg, "zip write failed");
+                if error.is_none() {
+                    error = Some(err.into());
+                }
+                return 1;
             }
         }
         0
     })?;
 
+    if let Some(err) = error {
+        return Err(err);
+    }
+
     tar.into_inner()?.finish()?;
     zip.finish()?;
     Ok(())
+}
+
+fn normalize_relative(path: &Path) -> PathBuf {
+    if path == Path::new(".") {
+        PathBuf::new()
+    } else {
+        path.to_path_buf()
+    }
+}
+
+fn should_skip_artifact_path(path: &Path) -> bool {
+    path.components().any(|c| {
+        matches!(
+            c.as_os_str().to_str(),
+            Some(".git") | Some(".github") | Some("target")
+        )
+    })
+}
+
+fn append_tar_entry(
+    tar: &mut TarBuilder<GzEncoder<fs::File>>,
+    path: &Path,
+    data: &[u8],
+) -> Result<()> {
+    let mut header = tar::Header::new_gnu();
+    header.set_path(path)?;
+    header.set_size(data.len() as u64);
+    header.set_mode(0o644);
+    header.set_cksum();
+    let mut cursor = Cursor::new(data);
+    tar.append(&header, &mut cursor)?;
+    Ok(())
+}
+
+fn to_unix_path(path: &Path) -> String {
+    path.components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn display_path(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
 }
