@@ -1,6 +1,8 @@
 mod config;
+mod github;
 mod infer;
 mod preflight;
+mod start;
 mod versioning;
 
 use anyhow::{Context, Result};
@@ -50,10 +52,27 @@ async fn main() -> Result<()> {
                 ctx.repo_name,
                 ctx.main_crate
             );
-            println!(
-                "start: ready (repo={}/{} main_crate={})",
-                ctx.repo_owner, ctx.repo_name, ctx.main_crate
-            );
+            match start::run_start(&ctx, cli.dry_run).await {
+                Ok(result) => {
+                    if let Some(url) = result.discussion_url {
+                        println!(
+                            "start: discussion created (category={} url={})",
+                            result.category, url
+                        );
+                    } else {
+                        println!(
+                            "start: dry-run (category={} title={})",
+                            result.category, result.title
+                        );
+                        println!("---\n{}", result.body);
+                    }
+                }
+                Err(err) => {
+                    eprintln!("Error: {}", err);
+                    tracing::error!(error=%err, "start command failed");
+                    std::process::exit(1);
+                }
+            }
         }
         Commands::Prerelease => {
             tracing::info!("prerelease: begin base_tag={:?}", ctx.last_stable_tag);

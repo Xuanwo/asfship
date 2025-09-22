@@ -187,6 +187,8 @@ Exit codes:
 2) Create a GitHub Discussion from built-in template.
 3) Output the Discussion URL.
 
+_Current implementation_: Shared preflight drives inference; dry-run prints the rendered template preview, and real runs create the Discussion via the GitHub API using the "Releases" category (falls back to the first available category when missing).
+
 ### 12.2 `prerelease`
 
 1) Resolve last stable tag (`vX.Y.Z`).
@@ -227,19 +229,20 @@ Idempotency: If the exact rc tag already exists, abort with instructions and do 
 
 ## 13. Implementation Plan (Phased)
 
-Phase 1 — CLI & Inference (MVP) — Status: wait on review
+Phase 1 — CLI & Inference (MVP) — Status: implemented
 - Skeleton CLI with subcommands and minimal config (optional).
+- Shared preflight builds `InferredContext` (clean repo enforcement, remote detection, crate discovery, main crate inference, last stable tag lookup).
+- `start` command renders the built-in template and opens GitHub Discussions (uses dry-run preview when requested).
 
-Phase 2 — Versioning & Changelog — Status: wait on review
-- Implement per-crate change detection, SemVer bump, and `Cargo.toml` updates (`toml_edit`).
-- Update dependent versions for intra-workspace crates.
-- Generate per-crate `CHANGELOG.md` sections.
-- Commit preparation in real mode; no network if `--dry-run`.
+Phase 2 — Versioning & Changelog — Status: implemented
+- Per-crate change detection, SemVer bumping, and `Cargo.toml` edits via `toml_edit`.
+- Dependent version updates across workspace manifests.
+- Per-crate `CHANGELOG.md` regeneration with grouped entries.
+- Release preparation commit created when not running in dry-run mode.
 
-Phase 3 — RC Tagging & Packaging
-- Create and push rc tags; create prerelease Releases on GitHub.
-- Implement per-crate packaging (git archive), checksums, upload assets.
-- Idempotency checks and rc auto-increment.
+Phase 3 — RC Tagging & Packaging — Status: implemented (prerelease path)
+- Auto-increment rc tags, ensure idempotency, and create annotated tags.
+- Push branch + tag, create GitHub prerelease, and upload per-crate archives with `.sha512` checksums.
 
 Phase 4 — Sync & Vote
 - Implement `sync` with async process execution for `svn` and asset selection.
