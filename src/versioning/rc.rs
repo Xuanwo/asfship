@@ -329,7 +329,7 @@ async fn compute_sha512(path: &Path) -> Result<String> {
     Ok(hex::encode(digest))
 }
 
-async fn upload_assets_with_retry(
+pub(crate) async fn upload_assets_with_retry(
     owner: &str,
     repo: &str,
     tag: &str,

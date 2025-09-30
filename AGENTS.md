@@ -247,13 +247,13 @@ Phase 3 — RC Tagging & Packaging — Status: implemented (prerelease path)
 - `--local-assets` skips push/upload while still producing local archives; `--artifact-dir` overrides output location.
 - Asset upload uses bounded retries and packaging validates that all planned crates produce both tar/zip variants.
 
-Phase 4 — Sync & Vote
-- Implement `sync` with async process execution for `svn` and asset selection.
-- Implement `vote` Discussions with templates and artifact tables.
+Phase 4 — Sync & Vote — Status: implemented
+- `sync` downloads the latest rc release assets and shells out to `svn` for publishing to `dist/dev` (respects `--dry-run`).
+- `vote` renders discussion bodies from `templates/vote.md`, pairs artifacts with sha512 values, and opens Discussions via the GitHub API.
 
-Phase 5 — Stable Release
-- Implement rc→stable promotion, stable Release, and release Discussion.
-- Polish: retries, rate limits, progress logs, error messages.
+Phase 5 — Stable Release — Status: implemented
+- `release` promotes the latest rc tag to a stable tag, re-uploads assets, and posts a release Discussion from `templates/release.md`.
+- Shared helpers cover retries for asset uploads and reuse the prerelease plan to summarize changed crates.
 
 ## 14. Libraries and Tools
 

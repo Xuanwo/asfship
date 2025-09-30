@@ -1,6 +1,6 @@
 mod apply;
 mod plan;
-mod rc;
+pub(crate) mod rc;
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -12,6 +12,7 @@ use git2::Repository;
 use crate::github;
 use crate::infer::InferredContext;
 
+pub(crate) use plan::{Plan, compute_plan};
 use rc::RcMode;
 
 pub struct PrereleaseOptions<'a> {

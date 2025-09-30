@@ -1,9 +1,14 @@
 mod config;
+mod discussion;
 mod github;
 mod infer;
 mod preflight;
+mod rc_release;
+mod release_cmd;
 mod start;
+mod sync;
 mod versioning;
+mod vote;
 
 use std::path::PathBuf;
 
@@ -103,30 +108,28 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Sync => {
-            tracing::info!("sync: preflight ok base={:?}", ctx.last_stable_tag);
-            println!(
-                "sync: ready (latest_rc_base={})",
-                ctx.last_stable_tag.as_deref().unwrap_or("<none>")
-            );
+            tracing::info!("sync: begin");
+            if let Err(e) = sync::run_sync(&ctx, cli.dry_run).await {
+                eprintln!("Error: {}", e);
+                tracing::error!(error=%e, "sync failed");
+                std::process::exit(1);
+            }
         }
         Commands::Vote => {
-            tracing::info!("vote: preflight ok");
-            println!(
-                "vote: ready (repo={}/{} tag_base={})",
-                ctx.repo_owner,
-                ctx.repo_name,
-                ctx.last_stable_tag.as_deref().unwrap_or("<none>")
-            );
+            tracing::info!("vote: begin");
+            if let Err(e) = vote::run_vote(&ctx, cli.dry_run).await {
+                eprintln!("Error: {}", e);
+                tracing::error!(error=%e, "vote failed");
+                std::process::exit(1);
+            }
         }
         Commands::Release => {
-            tracing::info!("release: preflight ok base={:?}", ctx.last_stable_tag);
-            println!(
-                "release: ready (repo={}/{} main_crate={} base_tag={})",
-                ctx.repo_owner,
-                ctx.repo_name,
-                ctx.main_crate,
-                ctx.last_stable_tag.as_deref().unwrap_or("<none>")
-            );
+            tracing::info!("release: begin");
+            if let Err(e) = release_cmd::run_release(&ctx, cli.dry_run).await {
+                eprintln!("Error: {}", e);
+                tracing::error!(error=%e, "release failed");
+                std::process::exit(1);
+            }
         }
     }
 
