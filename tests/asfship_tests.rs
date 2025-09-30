@@ -129,7 +129,15 @@ edition = "2021"
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout)?;
-    insta::assert_snapshot!(stdout, @r###"prerelease: ready (base_tag=<none> changed_crates=1)
+    insta::assert_snapshot!(stdout, @r###"prerelease summary
+mode: dry-run
+base tag: <none>
+main crate: foo
+rc tag: <pending>
+changed crates:
+* foo 0.1.0 -> 0.1.1
+  Others:
+    - init
 "###);
     Ok(())
 }

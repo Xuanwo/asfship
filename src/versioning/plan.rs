@@ -54,11 +54,16 @@ impl ChangeEntry {
 
 #[derive(Debug, Clone)]
 pub(crate) struct CratePlan {
+    previous_version: semver::Version,
     new_version: semver::Version,
     changes: Vec<ChangeEntry>,
 }
 
 impl CratePlan {
+    pub(crate) fn previous_version(&self) -> &semver::Version {
+        &self.previous_version
+    }
+
     pub(crate) fn new_version(&self) -> &semver::Version {
         &self.new_version
     }
@@ -204,6 +209,7 @@ pub(crate) fn compute_plan(repo: &Repository, ctx: &InferredContext) -> Result<P
             per_crate.insert(
                 c.name.clone(),
                 CratePlan {
+                    previous_version: c.version.clone(),
                     new_version: new,
                     changes: changes.clone(),
                 },

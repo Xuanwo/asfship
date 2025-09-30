@@ -76,16 +76,16 @@ async fn main() -> Result<()> {
         }
         Commands::Prerelease => {
             tracing::info!("prerelease: begin base_tag={:?}", ctx.last_stable_tag);
-            if let Err(e) = versioning::run_prerelease(&ctx, cli.dry_run).await {
-                eprintln!("Error: {}", e);
-                tracing::error!(error=%e, "prerelease failed");
-                std::process::exit(1);
+            match versioning::run_prerelease(&ctx, cli.dry_run).await {
+                Ok(report) => {
+                    println!("{}", report.render_text());
+                }
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    tracing::error!(error=%e, "prerelease failed");
+                    std::process::exit(1);
+                }
             }
-            println!(
-                "prerelease: ready (base_tag={} changed_crates={})",
-                ctx.last_stable_tag.as_deref().unwrap_or("<none>"),
-                ctx.crates.len()
-            );
         }
         Commands::Sync => {
             tracing::info!("sync: preflight ok base={:?}", ctx.last_stable_tag);

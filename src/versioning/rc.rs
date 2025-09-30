@@ -26,7 +26,7 @@ pub(crate) async fn execute_rc(
     repo: &Repository,
     ctx: &InferredContext,
     plan: &Plan,
-) -> Result<()> {
+) -> Result<String> {
     let base_version = plan
         .main_crate_version(&ctx.main_crate)
         .expect("main crate plan must exist before RC steps");
@@ -40,7 +40,7 @@ pub(crate) async fn execute_rc(
     create_github_prerelease(&ctx.repo_owner, &ctx.repo_name, &rc_tag).await?;
     let artifacts = package_changed_crates(ctx, plan, &rc_tag, rc_n).await?;
     upload_assets(&ctx.repo_owner, &ctx.repo_name, &rc_tag, &artifacts).await?;
-    Ok(())
+    Ok(rc_tag)
 }
 
 fn next_rc_tag(repo: &Repository, base: &semver::Version) -> Result<(String, u32)> {

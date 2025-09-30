@@ -239,6 +239,7 @@ Phase 2 — Versioning & Changelog — Status: implemented
 - Dependent version updates across workspace manifests.
 - Per-crate `CHANGELOG.md` regeneration with grouped entries.
 - Release preparation commit created when not running in dry-run mode.
+- `asfship prerelease --dry-run` now emits a human-readable summary of planned version bumps and commit highlights per crate.
 
 Phase 3 — RC Tagging & Packaging — Status: implemented (prerelease path)
 - Auto-increment rc tags, ensure idempotency, and create annotated tags.
