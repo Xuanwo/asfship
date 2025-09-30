@@ -1,18 +1,22 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Cursor;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use git2::Repository;
+use git2::{Commit, Repository};
 use reqwest::StatusCode;
 use reqwest::header;
 use sha2::{Digest, Sha512};
 use tar::Builder as TarBuilder;
+use tokio::fs as async_fs;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+use tokio::time::sleep;
 use urlencoding::encode as url_encode;
 use zip::CompressionMethod as ZipCompression;
 use zip::write::FileOptions as ZipOptions;
@@ -22,11 +26,30 @@ use crate::infer::InferredContext;
 
 use super::plan::Plan;
 
+const UPLOAD_RETRIES: usize = 3;
+
+pub(crate) enum RcMode {
+    Remote,
+    LocalOnly,
+}
+
+pub(crate) struct RcOutcome {
+    pub rc_tag: String,
+    pub artifact_dir: PathBuf,
+}
+
+pub(crate) struct PackagedCrate {
+    pub name: String,
+    pub files: Vec<PathBuf>,
+}
+
 pub(crate) async fn execute_rc(
     repo: &Repository,
     ctx: &InferredContext,
     plan: &Plan,
-) -> Result<String> {
+    artifact_dir: Option<&Path>,
+    mode: RcMode,
+) -> Result<RcOutcome> {
     let base_version = plan
         .main_crate_version(&ctx.main_crate)
         .expect("main crate plan must exist before RC steps");
@@ -34,13 +57,44 @@ pub(crate) async fn execute_rc(
     tracing::info!("rc: choosing tag={} (rc={})", rc_tag, rc_n);
 
     ensure_tag_absent(repo, &rc_tag)?;
-    create_rc_tag(repo, &rc_tag).await?;
-    push_head_and_tag(&ctx.repo_root, &rc_tag).await?;
 
-    create_github_prerelease(&ctx.repo_owner, &ctx.repo_name, &rc_tag).await?;
-    let artifacts = package_changed_crates(ctx, plan, &rc_tag, rc_n).await?;
-    upload_assets(&ctx.repo_owner, &ctx.repo_name, &rc_tag, &artifacts).await?;
-    Ok(rc_tag)
+    let commit = repo.head()?.peel_to_commit()?;
+
+    create_rc_tag(repo, &rc_tag).await?;
+
+    if matches!(mode, RcMode::Remote) {
+        push_head_and_tag(&ctx.repo_root, &rc_tag).await?;
+        create_github_prerelease(&ctx.repo_owner, &ctx.repo_name, &rc_tag).await?;
+    }
+
+    let artifact_root = resolve_artifact_root(ctx, artifact_dir);
+    let run_dir = artifact_root.join(rc_tag.replace('/', "_"));
+    async_fs::create_dir_all(&run_dir).await?;
+
+    let packaged = package_changed_crates(repo, ctx, plan, &commit, &run_dir, rc_n).await?;
+    validate_packaged(plan, &packaged)?;
+
+    if matches!(mode, RcMode::Remote) {
+        let mut all_files: Vec<PathBuf> = packaged
+            .iter()
+            .flat_map(|p| p.files.iter().cloned())
+            .collect();
+        all_files.sort();
+        upload_assets_with_retry(&ctx.repo_owner, &ctx.repo_name, &rc_tag, &all_files).await?;
+    }
+
+    Ok(RcOutcome {
+        rc_tag,
+        artifact_dir: run_dir,
+    })
+}
+
+fn resolve_artifact_root(ctx: &InferredContext, artifact_dir: Option<&Path>) -> PathBuf {
+    match artifact_dir {
+        Some(p) if p.is_absolute() => p.to_path_buf(),
+        Some(p) => ctx.repo_root.join(p),
+        None => ctx.repo_root.join("target").join("asfship"),
+    }
 }
 
 fn next_rc_tag(repo: &Repository, base: &semver::Version) -> Result<(String, u32)> {
@@ -163,29 +217,15 @@ async fn create_github_prerelease(owner: &str, repo: &str, tag: &str) -> Result<
 }
 
 async fn package_changed_crates(
+    repo: &Repository,
     ctx: &InferredContext,
     plan: &Plan,
-    rc_tag: &str,
+    commit: &Commit<'_>,
+    out_dir: &Path,
     rc_n: u32,
-) -> Result<Vec<PathBuf>> {
-    let out_dir = ctx
-        .repo_root
-        .join("target")
-        .join("asfship")
-        .join(rc_tag.replace('/', "_"));
-    tokio::fs::create_dir_all(&out_dir).await?;
-
-    let repo = Repository::discover(&ctx.repo_root)?;
-    let obj = repo
-        .revparse_single(&format!("refs/tags/{}", rc_tag))
-        .or_else(|_| repo.revparse_single(rc_tag))
-        .context("failed to resolve rc tag for packaging")?;
-    let commit = obj
-        .peel_to_commit()
-        .context("rc tag does not point to a commit")?;
+) -> Result<Vec<PackagedCrate>> {
     let tree = commit.tree()?;
-
-    let mut files: Vec<PathBuf> = Vec::new();
+    let mut packaged = Vec::new();
     for c in &ctx.crates {
         if let Some(crate_plan) = plan.crate_plan(&c.name) {
             let base = if c.name == ctx.main_crate {
@@ -214,9 +254,8 @@ async fn package_changed_crates(
             let tar_gz = out_dir.join(format!("{}.tar.gz", base));
             let zip = out_dir.join(format!("{}.zip", base));
 
-            package_from_tree(&repo, &tree, &crate_rel, &tar_gz, &zip)?;
-            files.push(tar_gz.clone());
-            files.push(zip.clone());
+            package_from_tree(repo, &tree, &crate_rel, &tar_gz, &zip)?;
+            let mut files = vec![tar_gz.clone(), zip.clone()];
 
             for f in [tar_gz, zip] {
                 let sha = compute_sha512(&f).await?;
@@ -224,16 +263,59 @@ async fn package_changed_crates(
                     "{}.sha512",
                     f.file_name().and_then(|n| n.to_str()).unwrap_or("artifact")
                 ));
-                tokio::fs::write(&sha_path, format!("{}\n", sha)).await?;
+                async_fs::write(&sha_path, format!("{}\n", sha)).await?;
                 files.push(sha_path);
             }
+
+            packaged.push(PackagedCrate {
+                name: c.name.clone(),
+                files,
+            });
         }
     }
-    Ok(files)
+    Ok(packaged)
+}
+
+fn validate_packaged(plan: &Plan, packaged: &[PackagedCrate]) -> Result<()> {
+    if packaged.len() != plan.changed_count() {
+        bail!(
+            "packaged crate count {} does not match plan {}",
+            packaged.len(),
+            plan.changed_count()
+        );
+    }
+    let expected: BTreeSet<_> = plan.iter().map(|(name, _)| name.clone()).collect();
+    let actual: BTreeSet<_> = packaged.iter().map(|p| p.name.clone()).collect();
+    if expected != actual {
+        bail!(
+            "packaged crates {:?} do not match plan {:?}",
+            actual,
+            expected
+        );
+    }
+    for entry in packaged {
+        let has_tar = entry
+            .files
+            .iter()
+            .any(|f| f.extension().and_then(|e| e.to_str()) == Some("gz"));
+        let has_zip = entry
+            .files
+            .iter()
+            .any(|f| f.extension().and_then(|e| e.to_str()) == Some("zip"));
+        if !has_tar || !has_zip {
+            bail!(
+                "crate {} missing expected archive variants (tar.gz={}, zip={})",
+                entry.name,
+                has_tar,
+                has_zip
+            );
+        }
+    }
+    Ok(())
 }
 
 async fn compute_sha512(path: &Path) -> Result<String> {
-    let mut file = tokio::fs::File::open(path).await?;
+    let mut file = async_fs::File::open(path).await?;
     let mut hasher = Sha512::new();
     let mut buf = [0u8; 8192];
     loop {
@@ -247,7 +329,12 @@ async fn compute_sha512(path: &Path) -> Result<String> {
     Ok(hex::encode(digest))
 }
 
-async fn upload_assets(owner: &str, repo: &str, tag: &str, files: &[PathBuf]) -> Result<()> {
+async fn upload_assets_with_retry(
+    owner: &str,
+    repo: &str,
+    tag: &str,
+    files: &[PathBuf],
+) -> Result<()> {
     if files.is_empty() {
         return Ok(());
     }
@@ -277,18 +364,49 @@ async fn upload_assets(owner: &str, repo: &str, tag: &str, files: &[PathBuf]) ->
             _ => "application/octet-stream",
         };
         let url = format!("{}?name={}", base_upload_url, url_encode(&name));
-        let bytes = tokio::fs::read(f).await?;
-        let resp = client
-            .post(&url)
-            .bearer_auth(&token)
-            .header(header::CONTENT_TYPE, ct)
-            .body(bytes)
-            .send()
-            .await?;
-        if !resp.status().is_success() {
-            bail!("upload asset failed for {}: {}", name, resp.status());
+        let bytes = async_fs::read(f).await?;
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let resp = client
+                .post(&url)
+                .bearer_auth(&token)
+                .header(header::CONTENT_TYPE, ct)
+                .body(bytes.clone())
+                .send()
+                .await;
+            match resp {
+                Ok(resp) if resp.status().is_success() => {
+                    tracing::debug!("uploaded asset {}", name);
+                    break;
+                }
+                Ok(resp) => {
+                    if attempt >= UPLOAD_RETRIES {
+                        bail!("upload asset failed for {}: {}", name, resp.status());
+                    }
+                    tracing::warn!(
+                        "upload {} failed with status {} (attempt {}/{})",
+                        name,
+                        resp.status(),
+                        attempt,
+                        UPLOAD_RETRIES
+                    );
+                }
+                Err(err) => {
+                    if attempt >= UPLOAD_RETRIES {
+                        return Err(err.into());
+                    }
+                    tracing::warn!(
+                        "upload {} errored: {} (attempt {}/{})",
+                        name,
+                        err,
+                        attempt,
+                        UPLOAD_RETRIES
+                    );
+                }
+            }
+            sleep(Duration::from_millis(200 * attempt as u64)).await;
         }
-        tracing::debug!("uploaded asset {}", name);
     }
     Ok(())
 }

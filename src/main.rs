@@ -5,6 +5,8 @@ mod preflight;
 mod start;
 mod versioning;
 
+use std::path::PathBuf;
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use tracing_subscriber::{EnvFilter, fmt};
@@ -15,6 +17,14 @@ struct Cli {
     /// Perform a dry run without mutating repo or network state
     #[arg(global = true, long = "dry-run", default_value_t = false)]
     dry_run: bool,
+
+    /// Override artifact output directory (defaults to target/asfship/<tag>)
+    #[arg(global = true, long = "artifact-dir")]
+    artifact_dir: Option<PathBuf>,
+
+    /// Skip pushing/uploads and only produce local artifacts
+    #[arg(global = true, long = "local-assets", default_value_t = false)]
+    local_assets: bool,
 
     #[command(subcommand)]
     command: Commands,
@@ -76,7 +86,12 @@ async fn main() -> Result<()> {
         }
         Commands::Prerelease => {
             tracing::info!("prerelease: begin base_tag={:?}", ctx.last_stable_tag);
-            match versioning::run_prerelease(&ctx, cli.dry_run).await {
+            let opts = versioning::PrereleaseOptions {
+                dry_run: cli.dry_run,
+                artifact_dir: cli.artifact_dir.as_deref(),
+                upload: !cli.local_assets,
+            };
+            match versioning::run_prerelease(&ctx, opts).await {
                 Ok(report) => {
                     println!("{}", report.render_text());
                 }

@@ -244,6 +244,8 @@ Phase 2 — Versioning & Changelog — Status: implemented
 Phase 3 — RC Tagging & Packaging — Status: implemented (prerelease path)
 - Auto-increment rc tags, ensure idempotency, and create annotated tags.
 - Push branch + tag, create GitHub prerelease, and upload per-crate archives with `.sha512` checksums.
+- `--local-assets` skips push/upload while still producing local archives; `--artifact-dir` overrides output location.
+- Asset upload uses bounded retries and packaging validates that all planned crates produce both tar/zip variants.
 
 Phase 4 — Sync & Vote
 - Implement `sync` with async process execution for `svn` and asset selection.

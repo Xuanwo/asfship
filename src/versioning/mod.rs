@@ -4,6 +4,7 @@ mod rc;
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 use git2::Repository;
@@ -11,7 +12,18 @@ use git2::Repository;
 use crate::github;
 use crate::infer::InferredContext;
 
-pub async fn run_prerelease(ctx: &InferredContext, dry_run: bool) -> Result<PrereleaseReport> {
+use rc::RcMode;
+
+pub struct PrereleaseOptions<'a> {
+    pub dry_run: bool,
+    pub artifact_dir: Option<&'a Path>,
+    pub upload: bool,
+}
+
+pub async fn run_prerelease(
+    ctx: &InferredContext,
+    opts: PrereleaseOptions<'_>,
+) -> Result<PrereleaseReport> {
     let repo = Repository::discover(&ctx.repo_root)?;
     let plan = plan::compute_plan(&repo, ctx)?;
     tracing::info!(
@@ -23,9 +35,9 @@ pub async fn run_prerelease(ctx: &InferredContext, dry_run: bool) -> Result<Prer
         bail!("main crate has no changes since base tag; aborting prerelease prep");
     }
 
-    let mut report = build_report(ctx, &plan, dry_run);
+    let mut report = build_report(ctx, &plan, opts.dry_run);
 
-    if dry_run {
+    if opts.dry_run {
         tracing::debug!("versioning: dry-run, skip applying changes");
         return Ok(report);
     }
@@ -35,14 +47,22 @@ pub async fn run_prerelease(ctx: &InferredContext, dry_run: bool) -> Result<Prer
 
     report.mark_applied();
 
-    if github::has_token() {
-        let rc_tag = rc::execute_rc(&repo, ctx, &plan).await?;
-        report.set_rc_tag(Some(rc_tag));
+    let mode = if opts.upload {
+        if github::has_token() {
+            RcMode::Remote
+        } else {
+            tracing::warn!(
+                "rc: requested upload but missing ASFSHIP_GITHUB_TOKEN; producing local assets only"
+            );
+            RcMode::LocalOnly
+        }
     } else {
-        tracing::warn!(
-            "rc: skip tagging and packaging (set ASFSHIP_GITHUB_TOKEN to enable GitHub integration)"
-        );
-    }
+        RcMode::LocalOnly
+    };
+
+    let outcome = rc::execute_rc(&repo, ctx, &plan, opts.artifact_dir, mode).await?;
+    report.set_rc_tag(Some(outcome.rc_tag));
+    report.set_artifact_dir(Some(outcome.artifact_dir));
 
     Ok(report)
 }
@@ -54,6 +74,7 @@ pub struct PrereleaseReport {
     dry_run: bool,
     changed_crates: Vec<ReportCrate>,
     rc_tag: Option<String>,
+    artifact_dir: Option<PathBuf>,
 }
 
 impl PrereleaseReport {
@@ -81,6 +102,14 @@ impl PrereleaseReport {
             "<skipped>"
         };
         writeln!(&mut out, "rc tag: {}", rc_status).unwrap();
+        let artifacts_status = if self.dry_run {
+            "<pending>".to_string()
+        } else if let Some(dir) = &self.artifact_dir {
+            dir.display().to_string()
+        } else {
+            "<skipped>".to_string()
+        };
+        writeln!(&mut out, "artifacts dir: {}", artifacts_status).unwrap();
 
         if self.changed_crates.is_empty() {
             writeln!(&mut out, "changed crates: <none>").unwrap();
@@ -125,6 +154,10 @@ impl PrereleaseReport {
 
     fn set_rc_tag(&mut self, tag: Option<String>) {
         self.rc_tag = tag;
+    }
+
+    fn set_artifact_dir(&mut self, dir: Option<PathBuf>) {
+        self.artifact_dir = dir;
     }
 }
 
@@ -174,6 +207,7 @@ fn build_report(ctx: &InferredContext, plan: &plan::Plan, dry_run: bool) -> Prer
         dry_run,
         changed_crates,
         rc_tag: None,
+        artifact_dir: None,
     }
 }
 
