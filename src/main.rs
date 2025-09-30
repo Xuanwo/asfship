@@ -1,9 +1,16 @@
 mod config;
+mod discussion;
 mod github;
 mod infer;
 mod preflight;
+mod rc_release;
+mod release_cmd;
 mod start;
+mod sync;
 mod versioning;
+mod vote;
+
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -15,6 +22,14 @@ struct Cli {
     /// Perform a dry run without mutating repo or network state
     #[arg(global = true, long = "dry-run", default_value_t = false)]
     dry_run: bool,
+
+    /// Override artifact output directory (defaults to target/asfship/<tag>)
+    #[arg(global = true, long = "artifact-dir")]
+    artifact_dir: Option<PathBuf>,
+
+    /// Skip pushing/uploads and only produce local artifacts
+    #[arg(global = true, long = "local-assets", default_value_t = false)]
+    local_assets: bool,
 
     #[command(subcommand)]
     command: Commands,
@@ -76,42 +91,45 @@ async fn main() -> Result<()> {
         }
         Commands::Prerelease => {
             tracing::info!("prerelease: begin base_tag={:?}", ctx.last_stable_tag);
-            if let Err(e) = versioning::run_prerelease(&ctx, cli.dry_run).await {
-                eprintln!("Error: {}", e);
-                tracing::error!(error=%e, "prerelease failed");
-                std::process::exit(1);
+            let opts = versioning::PrereleaseOptions {
+                dry_run: cli.dry_run,
+                artifact_dir: cli.artifact_dir.as_deref(),
+                upload: !cli.local_assets,
+            };
+            match versioning::run_prerelease(&ctx, opts).await {
+                Ok(report) => {
+                    println!("{}", report.render_text());
+                }
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    tracing::error!(error=%e, "prerelease failed");
+                    std::process::exit(1);
+                }
             }
-            println!(
-                "prerelease: ready (base_tag={} changed_crates={})",
-                ctx.last_stable_tag.as_deref().unwrap_or("<none>"),
-                ctx.crates.len()
-            );
         }
         Commands::Sync => {
-            tracing::info!("sync: preflight ok base={:?}", ctx.last_stable_tag);
-            println!(
-                "sync: ready (latest_rc_base={})",
-                ctx.last_stable_tag.as_deref().unwrap_or("<none>")
-            );
+            tracing::info!("sync: begin");
+            if let Err(e) = sync::run_sync(&ctx, cli.dry_run).await {
+                eprintln!("Error: {}", e);
+                tracing::error!(error=%e, "sync failed");
+                std::process::exit(1);
+            }
         }
         Commands::Vote => {
-            tracing::info!("vote: preflight ok");
-            println!(
-                "vote: ready (repo={}/{} tag_base={})",
-                ctx.repo_owner,
-                ctx.repo_name,
-                ctx.last_stable_tag.as_deref().unwrap_or("<none>")
-            );
+            tracing::info!("vote: begin");
+            if let Err(e) = vote::run_vote(&ctx, cli.dry_run).await {
+                eprintln!("Error: {}", e);
+                tracing::error!(error=%e, "vote failed");
+                std::process::exit(1);
+            }
         }
         Commands::Release => {
-            tracing::info!("release: preflight ok base={:?}", ctx.last_stable_tag);
-            println!(
-                "release: ready (repo={}/{} main_crate={} base_tag={})",
-                ctx.repo_owner,
-                ctx.repo_name,
-                ctx.main_crate,
-                ctx.last_stable_tag.as_deref().unwrap_or("<none>")
-            );
+            tracing::info!("release: begin");
+            if let Err(e) = release_cmd::run_release(&ctx, cli.dry_run).await {
+                eprintln!("Error: {}", e);
+                tracing::error!(error=%e, "release failed");
+                std::process::exit(1);
+            }
         }
     }
 

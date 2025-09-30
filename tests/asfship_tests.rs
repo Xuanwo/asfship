@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use assert_cmd::Command;
@@ -129,7 +129,16 @@ edition = "2021"
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout)?;
-    insta::assert_snapshot!(stdout, @r###"prerelease: ready (base_tag=<none> changed_crates=1)
+    insta::assert_snapshot!(stdout, @r###"prerelease summary
+mode: dry-run
+base tag: <none>
+main crate: foo
+rc tag: <pending>
+artifacts dir: <pending>
+changed crates:
+* foo 0.1.0 -> 0.1.1
+  Others:
+    - init
 "###);
     Ok(())
 }
@@ -217,5 +226,70 @@ edition = "2021"
     cmd.assert().success();
     let v = read_version(&root.join("Cargo.toml"));
     assert_eq!(v, "1.3.0");
+    Ok(())
+}
+
+#[test]
+fn prerelease_local_assets_creates_artifacts() -> Result<()> {
+    let td = TempDir::new()?;
+    let root = td.path();
+
+    write_file(
+        &root.join("Cargo.toml"),
+        r#"[package]
+name = "foo"
+version = "0.1.0"
+edition = "2021"
+"#,
+    )?;
+    write_file(&root.join("src/lib.rs"), "pub fn f() {}\n")?;
+    let repo = init_repo(root, "https://github.com/apache/foo.git")?;
+
+    write_file(&root.join("src/new.rs"), "pub fn g() {}\n")?;
+    commit_all(&repo, "feat: add local packaging")?;
+
+    let mut cmd = asfship_cmd(root)?;
+    cmd.args(["prerelease", "--local-assets"]);
+    let output = cmd.output()?;
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let artifact_root = root.join("target").join("asfship");
+    assert!(
+        artifact_root.exists(),
+        "artifact root missing: {:?}",
+        artifact_root
+    );
+
+    fn collect(dir: &Path, acc: &mut Vec<PathBuf>) -> Result<()> {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                collect(&path, acc)?;
+            } else if path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("gz"))
+                .unwrap_or(false)
+            {
+                acc.push(path);
+            }
+        }
+        Ok(())
+    }
+
+    let mut archives = Vec::new();
+    collect(&artifact_root, &mut archives)?;
+    assert!(
+        !archives.is_empty(),
+        "expected archives under {:?}",
+        artifact_root
+    );
+
     Ok(())
 }

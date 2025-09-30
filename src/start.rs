@@ -1,7 +1,8 @@
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tera::{Context as TeraContext, Tera};
 
+use crate::discussion::{self, CreateDiscussionPayload, DiscussionResponse};
 use crate::github;
 use crate::infer::InferredContext;
 
@@ -13,24 +14,6 @@ pub struct StartResult {
     pub body: String,
     pub category: String,
     pub discussion_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct DiscussionCategory {
-    pub id: u64,
-    pub name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct DiscussionResponse {
-    pub html_url: String,
-}
-
-#[derive(Debug, Serialize)]
-struct CreateDiscussionPayload<'a> {
-    title: &'a str,
-    body: &'a str,
-    category_id: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -57,23 +40,7 @@ pub async fn run_start(ctx: &InferredContext, dry_run: bool) -> Result<StartResu
     }
 
     let gh = github::client()?;
-    let categories: Vec<DiscussionCategory> = gh
-        .get(
-            format!(
-                "repos/{}/{}/discussions/categories",
-                ctx.repo_owner, ctx.repo_name
-            ),
-            None::<&()>,
-        )
-        .await
-        .with_context(|| {
-            format!(
-                "failed to load discussion categories for {}/{}",
-                ctx.repo_owner, ctx.repo_name
-            )
-        })?;
-
-    let category = choose_category(&categories)?;
+    let category = discussion::fetch_default_category(&gh, &ctx.repo_owner, &ctx.repo_name).await?;
     tracing::info!(category=%category.name, "start: using discussion category");
 
     let payload = CreateDiscussionPayload {
@@ -127,16 +94,4 @@ fn render_body(ctx: &InferredContext) -> Result<String> {
 
     Tera::one_off(START_TEMPLATE, &tera_ctx, false)
         .map_err(|err| anyhow::anyhow!("failed to render start template: {}", err))
-}
-
-fn choose_category(categories: &[DiscussionCategory]) -> Result<DiscussionCategory> {
-    if categories.is_empty() {
-        bail!("repository has no discussion categories; enable GitHub Discussions first");
-    }
-    let choice = categories
-        .iter()
-        .find(|c| c.name.eq_ignore_ascii_case("Releases"))
-        .or_else(|| categories.iter().next())
-        .expect("non-empty categories");
-    Ok(choice.clone())
 }
