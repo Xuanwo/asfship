@@ -347,3 +347,12 @@ Changed crates:
 - {{ c.name }}: {{ c.old_version }} → {{ c.new_version }}
 {% endfor %}
 ```
+
+## 20. Known Limitations and Future Work
+
+- GitHub and ASF SVN credentials must be provided out-of-band; no helper flows exist yet for interactive authentication or token validation.
+- `asfship prerelease` aborts when the main crate has no changes even if leaf crates differ. Evaluate whether an override flag is warranted for patch-only utility releases.
+- Artifact signing remains a manual step. We expect maintainers to upload `.asc` files before running `asfship sync`; automation is tracked as a future enhancement.
+- Network interactions are untested in CI. Add integration tests or contract tests once we have hosted fixtures or a reliable sandbox for GitHub and SVN APIs.
+- Template customization requires editing repository files directly. Consider adding a user config layer or template discovery rules if downstream projects need overrides outside the workspace root.
+
