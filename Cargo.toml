@@ -7,7 +7,7 @@ edition = "2024"
 anyhow = "1.0.86"
 cargo_metadata = "0.18.1"
 clap = { version = "4.5.16", features = ["derive"] }
-git2 = "0.19.0"
+git2 = "0.20.4"
 regex = "1.10.6"
 serde = { version = "1.0.210", features = ["derive"] }
 toml = "0.8.19"
