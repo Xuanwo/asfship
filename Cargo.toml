@@ -18,7 +18,7 @@ chrono = { version = "0.4.38", default-features = false, features = ["clock"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt", "ansi"] }
 octocrab = "0.38.0"
-tar = "0.4.40"
+tar = "0.4.45"
 flate2 = { version = "1.0.35", default-features = false, features = ["rust_backend"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
 sha2 = "0.10.8"
